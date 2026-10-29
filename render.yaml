@@ -1,0 +1,18 @@
+# Aizens NotebookLM: deployment manual, activación por demanda.
+services:
+  - type: web
+    name: aizens-notebooklm
+    runtime: docker
+    plan: free
+    branch: main
+    dockerContext: .
+    dockerfilePath: ./render/Dockerfile
+    healthCheckPath: /healthz
+    autoDeployTrigger: off
+    envVars:
+      - key: NOTEBOOKLM_SERVER_ALLOW_EXTERNAL_BIND
+        value: "1"
+      - key: NOTEBOOKLM_SERVER_TOKEN
+        generateValue: true
+      - key: NOTEBOOKLM_MASTER_TOKEN_JSON
+        sync: false
