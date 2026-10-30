@@ -112,9 +112,8 @@ RESULT=$(curl -sS --connect-timeout 15 --max-time 80 \
       }
     ]
   }' "$API/projects/$PROJECT_ID/services/combined")
-HTTP_CODE="${RESULT##*NF_HTTP_STATUS:}"
-RESULT="${RESULT%
-\n'NF_HTTP_STATUS:*}"
+HTTP_CODE=$(printf '%s' "$RESULT" | tail -n 1 | sed 's/^NF_HTTP_STATUS://')
+RESULT=$(printf '%s' "$RESULT" | sed '$d')
 if [[ "$HTTP_CODE" != "200" && "$HTTP_CODE" != "201" ]]; then
   echo "Northflank respondió HTTP $HTTP_CODE. No se ha confirmado la creación."
   # Mostrar únicamente campos de diagnostico: nunca tokens ni cabeceras.
