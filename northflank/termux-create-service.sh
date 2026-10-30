@@ -67,7 +67,10 @@ case "$ANSWER" in
 esac
 
 echo "[3/3] Creando servicio..."
-RESULT=$(curl -fsS --connect-timeout 15 --max-time 80 \
+# IMPORTANTE: -f oculta el cuerpo de las respuestas HTTP 4xx.
+# Capturar y mostrar el detalle del error sin mostrar el token de autorizacion.
+RESULT=$(curl -sS --connect-timeout 15 --max-time 80 \
+  -w '\nNF_HTTP_STATUS:%{http_code}' \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -X POST \
@@ -109,4 +112,26 @@ RESULT=$(curl -fsS --connect-timeout 15 --max-time 80 \
       }
     ]
   }' "$API/projects/$PROJECT_ID/services/combined")
+HTTP_CODE="${RESULT##*NF_HTTP_STATUS:}"
+RESULT="${RESULT%
+\n'NF_HTTP_STATUS:*}"
+if [[ "$HTTP_CODE" != "200" && "$HTTP_CODE" != "201" ]]; then
+  echo "Northflank respondió HTTP $HTTP_CODE. No se ha confirmado la creación."
+  # Mostrar únicamente campos de diagnostico: nunca tokens ni cabeceras.
+  printf '%s' "$RESULT" | python -c 'import json,sys
+try:
+    obj=json.load(sys.stdin)
+except (ValueError,TypeError):
+    print("Respuesta no JSON; revisar desde el panel de Northflank.")
+    sys.exit(0)
+for key in ("message","error","code","details","errors","status"):
+    value=obj.get(key) if isinstance(obj,dict) else None
+    if value is not None:
+        if isinstance(value,dict):
+            value={k:v for k,v in value.items() if k in ("message","code","type","details","status","errors","reason")}
+        print(f"{key}: {str(value)[:1200]}")
+' || true
+  echo "Si ves HTTP 409, copia aqui SOLO el mensaje de error, nunca el token."
+  exit 4
+fi
 printf '%s' "$RESULT" | python -c 'import json,sys; o=json.load(sys.stdin); d=o.get("data",{}); print("Servicio creado:",d.get("name",""),"ID:",d.get("id","no devuelto")); print("Pendiente: secretos, build, replicas=1 y prueba real.")'
