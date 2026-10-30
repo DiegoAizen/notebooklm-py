@@ -12,6 +12,11 @@ import logging
 import os
 from pathlib import Path
 from typing import Annotated
+import sys
+
+# The Vercel runtime does not preserve uv's editable-install .pth files.
+# Include this fork's src-layout package on the function import path.
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
