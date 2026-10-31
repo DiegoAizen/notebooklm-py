@@ -137,3 +137,19 @@ async def ask_notebook(notebook_id: str, body: AskRequest):
     except Exception as exc:
         _LOG.warning("NotebookLM chat failed: %s", type(exc).__name__)
         raise HTTPException(502, "NotebookLM query failed; inspect server logs") from None
+
+
+# Aizens Brain: private read-only MCP endpoint for scoped agent connections.
+# Reuse the proven NotebookLM auth/session lifecycle, never a second master token.
+from aizens_brain_mcp import create_router
+
+
+async def _brain_ask_notebook(notebook_id: str, question: str) -> dict:
+    _prepare_auth()
+    await _ensure_session()
+    async with NotebookLMClient.from_storage(profile=_PROFILE) as client:
+        result = await client.chat.ask(notebook_id, question)
+        return ask_result_view(result)
+
+
+app.include_router(create_router(_brain_ask_notebook), prefix="/mcp")
