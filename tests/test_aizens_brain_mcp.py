@@ -61,7 +61,11 @@ def test_initialize_and_list(client):
     response = request(c, "initialize", params={"protocolVersion": "2025-06-18"})
     assert response.json()["result"]["capabilities"]["tools"] == {"listChanged": False}
     names = [x["name"] for x in request(c, "tools/list").json()["result"]["tools"]]
-    assert names == ["brain_list_notebooks", "brain_ask_notebook", "brain_list_projects", "brain_get_context", "brain_ask_project"]
+    assert names[:5] == ["brain_list_notebooks", "brain_ask_notebook", "brain_list_projects", "brain_get_context", "brain_ask_project"]
+    assert names[5:] == [
+        "brain_create_project", "brain_add_memory", "brain_start_research",
+        "brain_research_status", "brain_import_research",
+    ]
     headers = {"Authorization": "Bearer owner-key-123"}
     assert c.post("/mcp",
                   json={"jsonrpc": "2.0", "method": "notifications/initialized"},
@@ -134,4 +138,24 @@ def test_unconfigured_registry_explains_next_step(client, monkeypatch):
     monkeypatch.delenv("AIZENS_PROJECTS_JSON")
     _, result = tool(c, "brain_list_projects")
     assert data(result)["needs_registry_configuration"] is True
+    assert calls == []
+
+
+def test_write_operations_require_write_oauth_scope(client, monkeypatch):
+    c, calls = client
+    monkeypatch.setenv("NOTEBOOKLM_SERVER_TOKEN", "a" * 48)
+    # Mock a valid read-only session; it must not become a writer after upgrade.
+    def read_only_claims(token):
+        return {"scope": "brain:read"}
+    monkeypatch.setattr("aizens_brain_oauth.get_oauth_access", read_only_claims)
+    status, result = tool(
+        c, "brain_create_project",
+        {"project": "ruti-demo", "title": "Ruti Demo",
+         "initial_context": "Ejemplo de proyecto que no debe crearse con solo lectura.",
+         "confirmed": True},
+        token="ab1.read-only-mock",
+    )
+    assert status == 200
+    assert result["isError"] is True
+    assert "Write permission" in data(result)["error"]
     assert calls == []
