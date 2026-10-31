@@ -6,6 +6,21 @@
 **Objetivo:** recuperar memoria documental de NotebookLM sin compartir el token maestro de Google con ChatGPT.
 
 
+## Nueva conexión Aizens Brain v2 — evitar herramientas antiguas de ChatGPT
+
+**URL verificada en Vercel:** `https://aizens-notebooklm.vercel.app/mcp-v2`
+
+La conexión antigua `/mcp` fue registrada cuando solo existían cinco herramientas. ChatGPT puede conservar su esquema de herramientas aun tras modificar/reconectar esa misma URL. `/mcp-v2` es una identidad MCP diferente, con un descubrimiento OAuth propio (`/.well-known/oauth-protected-resource/mcp-v2`).
+
+Para obtener el conjunto actualizado, **crear una conexión NUEVA** en ChatGPT web con nombre `Aizens Brain v2` y la URL `/mcp-v2`. Autoriza las dos capacidades `brain:read` y `brain:write` en la pantalla HTTPS de Vercel. La app anterior puede mantenerse solo para lectura hasta confirmar el funcionamiento de la nueva.
+
+**Pruebas reproducibles (2026-10-31):**
+- 29 tests en un sandbox aislado ejecutados, 29 PASS (OAuth, herramienta listing, creación con Google simulado, permisos y seguridad).
+- Despliegue de Vercel READY, `/healthz` responde 200, el descubrimiento OAuth específico de `/mcp-v2` responde 200 con recurso correcto, y `GET /mcp-v2` devuelve 405 (POST requerido).
+- **Pendiente:** que ChatGPT registre las 10 herramientas desde la nueva URL y cree un cuaderno real con `brain_create_project`. Hasta verificar en NotebookLM la creación y la fuente, NO marcar como completado el piloto Ruti.
+
+El contrato MCP tiene 10 herramientas: `brain_list_notebooks`, `brain_ask_notebook`, `brain_list_projects`, `brain_get_context`, `brain_ask_project`, `brain_create_project`, `brain_add_memory`, `brain_start_research`, `brain_research_status` y `brain_import_research`.
+
 ## IMPORTANTE — Migración del complemento antiguo de solo lectura
 
 Los MCP instalados antes de habilitar las herramientas de escritura pueden
