@@ -135,3 +135,37 @@ def test_csrf_prevents_direct_post(app):
     res = app.post("/oauth/authorize", data={**fields, "password": "a" * 48},
                    follow_redirects=False)
     assert res.status_code == 403
+
+
+def test_browser_without_cookie_can_authorize_signed_form(app):
+    fields = make_form(app, _fields())
+    app.cookies.clear()
+    response = app.post(
+        "/oauth/authorize",
+        data={**fields, "password": "a" * 48},
+        follow_redirects=False,
+    )
+    assert response.status_code == 200
+    assert "Continuar en ChatGPT" in response.text
+
+
+def test_explicit_cross_origin_is_rejected_even_with_signed_form(app):
+    fields = make_form(app, _fields())
+    response = app.post(
+        "/oauth/authorize",
+        data={**fields, "password": "a" * 48},
+        headers={"Origin": "https://not-our-site.example"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 403
+
+
+def test_tampering_with_signed_form_fails_closed(app):
+    fields = make_form(app, _fields())
+    fields["state"] = "unexpected-state"
+    response = app.post(
+        "/oauth/authorize",
+        data={**fields, "password": "a" * 48},
+        follow_redirects=False,
+    )
+    assert response.status_code == 403
