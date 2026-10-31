@@ -262,15 +262,17 @@ def create_router(
     research_start: Callable[[str, str, str], Awaitable[dict]] | None = None,
     research_poll: Callable[[str, str], Awaitable[dict]] | None = None,
     research_import: Callable[[str, str, list[dict]], Awaitable[list[dict]]] | None = None,
+    resource_path: str = "/mcp",
 ) -> APIRouter:
     """Mount using app.include_router(create_router(...), prefix='/mcp')."""
+    if resource_path not in ("/mcp", "/mcp-v2"):
+        raise ValueError("Unsupported resource path")
     router = APIRouter()
-
 
     def _authenticate_with_oauth(authorization: str | None) -> Principal:
         if authorization and authorization.startswith("Bearer ab1."):
             from aizens_brain_oauth import get_oauth_access
-            claims = get_oauth_access(authorization[7:])
+            claims = get_oauth_access(authorization[7:], resource=resource_path)
             if claims is not None:
                 return Principal(
                     "chatgpt-owner", None,
@@ -282,7 +284,7 @@ def create_router(
         if exc.status_code != 401:
             return exc
         from aizens_brain_oauth import _base
-        metadata = _base() + "/.well-known/oauth-protected-resource"
+        metadata = _base() + "/.well-known/oauth-protected-resource" + ("/mcp-v2" if resource_path == "/mcp-v2" else "")
         return HTTPException(
             401,
             "Authentication required",
@@ -325,7 +327,7 @@ def create_router(
             return JSONResponse(_jsonrpc_result(ident, {
                 "protocolVersion": version,
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "aizens-brain", "version": "0.1.0"},
+                "serverInfo": {"name": "aizens-brain", "version": "0.2.0"},
                 "instructions": (
                     "Use brain_list_projects before asking about project memory. "
                     "Projects can be created in-chat using brain_create_project with explicit "
