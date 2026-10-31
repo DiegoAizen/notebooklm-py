@@ -23,8 +23,7 @@ from pydantic import BaseModel, Field
 
 from notebooklm import NotebookLMClient
 from notebooklm._auth.master_token import bootstrap_missing_storage_from_master_token
-from notebooklm._app.views import ask_result_view, notebook_view, source_view
-from notebooklm._app.serialize import to_jsonable
+from notebooklm._app.views import ask_result_view, notebook_view
 
 _LOG = logging.getLogger("aizens.vercel")
 _HOME = Path("/tmp/aizens-notebooklm")
@@ -140,96 +139,87 @@ async def ask_notebook(notebook_id: str, body: AskRequest):
         raise HTTPException(502, "NotebookLM query failed; inspect server logs") from None
 
 
-# Aizens Brain: private read-only MCP endpoint for scoped agent connections.
-# Reuse the proven NotebookLM auth/session lifecycle, never a second master token.
-from aizens_brain_mcp import create_router
-from aizens_brain_oauth import create_oauth_router
+# Adapt the fork's EXISTING native FastMCP server instead of copying its tools.
+# The OAuth sign-in is the only ChatGPT-specific integration kept here.
+from contextlib import asynccontextmanager
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from starlette.routing import Route
 
-async def _brain_ask_notebook(notebook_id: str, question: str) -> dict:
-    _prepare_auth()
-    await _ensure_session()
-    async with NotebookLMClient.from_storage(profile=_PROFILE) as client:
-        result = await client.chat.ask(notebook_id, question)
-        return ask_result_view(result)
-
-
-async def _brain_list_notebooks() -> list[dict]:
-    _prepare_auth()
-    await _ensure_session()
-    async with NotebookLMClient.from_storage(profile=_PROFILE) as client:
-        return [notebook_view(nb) for nb in await client.notebooks.list()]
-
+from aizens_brain_oauth import _base, create_oauth_router, get_oauth_access
+from notebooklm.mcp import create_server
 
 app.include_router(create_oauth_router())
 
-async def _brain_create_notebook(title: str) -> dict:
+
+@asynccontextmanager
+async def _native_client_factory():
+    """Reuse the proven private Vercel/Google session for native NotebookLM tools."""
     _prepare_auth()
     await _ensure_session()
     async with NotebookLMClient.from_storage(profile=_PROFILE) as client:
-        notebook = await client.notebooks.create(title)
-        return notebook_view(notebook)
+        yield client
 
 
-async def _brain_add_text(notebook_id: str, title: str, content: str) -> dict:
-    _prepare_auth()
-    await _ensure_session()
-    async with NotebookLMClient.from_storage(profile=_PROFILE) as client:
-        source = await client.sources.add_text(
-            notebook_id, title, content, wait=True, idempotent=True
-        )
-        return source_view(source)
-
-
-async def _brain_research_start(notebook_id: str, query: str, mode: str) -> dict:
-    _prepare_auth()
-    await _ensure_session()
-    async with NotebookLMClient.from_storage(profile=_PROFILE) as client:
-        return to_jsonable(await client.research.start(
-            notebook_id, query, source="web", mode=mode
-        ))
-
-
-async def _brain_research_poll(notebook_id: str, task_id: str) -> dict:
-    _prepare_auth()
-    await _ensure_session()
-    async with NotebookLMClient.from_storage(profile=_PROFILE) as client:
-        return to_jsonable(await client.research.poll(notebook_id, task_id))
-
-
-async def _brain_research_import(notebook_id: str, task_id: str, sources: list[dict]) -> list[dict]:
-    _prepare_auth()
-    await _ensure_session()
-    async with NotebookLMClient.from_storage(profile=_PROFILE) as client:
-        result = await client.research.import_sources(
-            notebook_id, task_id, sources
-        )
-        return to_jsonable(result)
-
-
-app.include_router(
-    create_router(
-        _brain_ask_notebook, _brain_list_notebooks,
-        create_notebook=_brain_create_notebook,
-        add_text=_brain_add_text,
-        research_start=_brain_research_start,
-        research_poll=_brain_research_poll,
-        research_import=_brain_research_import,
-    ),
-    prefix="/mcp",
+# Register the native notebook_list/create, source_add, research_start, etc.
+# No custom project creation or research implementations.
+_native_mcp = create_server(profile=_PROFILE, client_factory=_native_client_factory)
+_native_http = _native_mcp.http_app(
+    path="/mcp-v2", stateless_http=True, json_response=True
 )
 
-# Separate endpoint identity forces clients that cached v1 tool schemas to
-# discover the actual ten-tool contract on a fresh app connection.
-app.include_router(
-    create_router(
-        _brain_ask_notebook, _brain_list_notebooks,
-        create_notebook=_brain_create_notebook,
-        add_text=_brain_add_text,
-        research_start=_brain_research_start,
-        research_poll=_brain_research_poll,
-        research_import=_brain_research_import,
-        resource_path="/mcp-v2",
-    ),
-    prefix="/mcp-v2",
+# Both historical URLs resolve to ONE native tool registry and ONE client factory.
+# Preserve /mcp while allowing clients that cached an old tool schema to use /mcp-v2.
+_native_endpoint = next(route for route in _native_http.routes if route.path == "/mcp-v2")
+_native_http.routes.append(
+    Route("/mcp", _native_endpoint.endpoint, methods=["POST", "DELETE"])
 )
+
+
+@asynccontextmanager
+async def _native_lifespan(root_app):
+    async with _native_http.lifespan(root_app):
+        yield
+
+
+app.router.lifespan_context = _native_lifespan
+
+
+@app.middleware("http")
+async def _authorize_native_mcp(request: Request, call_next):
+    if request.url.path.rstrip("/") in ("/mcp", "/mcp-v2"):
+        authorization = request.headers.get("authorization", "")
+        token = authorization[7:] if authorization.startswith("Bearer ") else ""
+        endpoint = request.url.path.rstrip("/")
+        claims = get_oauth_access(token, resource=endpoint) if token else None
+        has_write_scope = bool(
+            claims
+            and {"brain:read", "brain:write"}.issubset(
+                set(claims.get("scope", "").split())
+            )
+        )
+        owner_token = os.environ.get("NOTEBOOKLM_SERVER_TOKEN", "").strip()
+        is_owner = bool(
+            token and owner_token and hmac.compare_digest(token, owner_token)
+        )
+        if not (has_write_scope or is_owner):
+            metadata_path = "/.well-known/oauth-protected-resource"
+            if endpoint == "/mcp-v2":
+                metadata_path += "/mcp-v2"
+            return JSONResponse(
+                {"error": "Authentication with write permission required"},
+                status_code=401,
+                headers={
+                    "WWW-Authenticate": (
+                        f'Bearer resource_metadata="{_base()}{metadata_path}", '
+                        'scope="brain:read brain:write"'
+                    ),
+                    "Cache-Control": "no-store",
+                },
+            )
+    return await call_next(request)
+
+
+# FastMCP owns the MCP protocol; FastAPI retains /healthz, /v1 and OAuth routes.
+app.mount("/", _native_http)
