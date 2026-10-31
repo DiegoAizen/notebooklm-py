@@ -142,6 +142,7 @@ async def ask_notebook(notebook_id: str, body: AskRequest):
 # Aizens Brain: private read-only MCP endpoint for scoped agent connections.
 # Reuse the proven NotebookLM auth/session lifecycle, never a second master token.
 from aizens_brain_mcp import create_router
+from aizens_brain_oauth import create_oauth_router
 
 
 async def _brain_ask_notebook(notebook_id: str, question: str) -> dict:
@@ -152,4 +153,12 @@ async def _brain_ask_notebook(notebook_id: str, question: str) -> dict:
         return ask_result_view(result)
 
 
-app.include_router(create_router(_brain_ask_notebook), prefix="/mcp")
+async def _brain_list_notebooks() -> list[dict]:
+    _prepare_auth()
+    await _ensure_session()
+    async with NotebookLMClient.from_storage(profile=_PROFILE) as client:
+        return [notebook_view(nb) for nb in await client.notebooks.list()]
+
+
+app.include_router(create_oauth_router())
+app.include_router(create_router(_brain_ask_notebook, _brain_list_notebooks), prefix="/mcp")
