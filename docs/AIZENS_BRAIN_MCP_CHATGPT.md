@@ -1,9 +1,35 @@
 # Aizens Brain — MCP privado para ChatGPT web y agentes
 
 **URL:** `https://aizens-notebooklm.vercel.app/mcp`  
-**Estado de publicación:** Endpoint MCP + OAuth en el mismo Vercel que `/v1/notebooks`.  
+**Estado de publicación:** Endpoint MCP + OAuth en el mismo Vercel que `/v1/notebooks`; herramientas de proyectos/memoria/investigación añadidas (validar en conexión renovada).  
 **Fecha:** 2026-10-31.  
 **Objetivo:** recuperar memoria documental de NotebookLM sin compartir el token maestro de Google con ChatGPT.
+
+
+## Crear proyectos desde el chat (nuevo)
+
+**No hace falta editar Vercel para dar de alta cada proyecto.** Los proyectos creados por Aizens Brain tienen un cuaderno propio de NotebookLM con título `Aizens · slug · título`. El servidor descubre esos cuadernos al listar la cuenta de NotebookLM; la memoria se guarda como fuentes de texto reales.
+
+La conexión anterior estaba limitada a `brain:read`. Las acciones nuevas requieren volver a **autorizar el complemento con `brain:read brain:write`** desde ChatGPT y confirmar explícitamente cada mutación. No se reutiliza una sesión de solo lectura para escribir.
+
+### Herramientas disponibles
+
+- `brain_create_project`: crea un cuaderno nuevo y guarda el contexto inicial como una fuente. Necesita nombre, título, contexto aportado/contrastado y `confirmed=true`.
+- `brain_list_projects` y `brain_get_context`: descubren y leen proyectos existentes automáticamente, sin lista manual.
+- `brain_add_memory`: añade información real, decisiones, SHA, pruebas y relevo como fuente versionada de NotebookLM. No inventar el contenido ni guardarlo sin confirmación.
+- `brain_start_research`: arranca una investigación web de NotebookLM para un proyecto.
+- `brain_research_status`: consulta el avance y fuentes candidatas mediante `task_id`.
+- `brain_import_research`: incorpora hasta 8 URLs revisadas a las fuentes del cuaderno tras confirmación explícita.
+
+Ejemplo de petición a ChatGPT:
+
+> Crea en Aizens Brain un proyecto llamado `ruti` con título «Ruti Ecuador». Primero consulta el repositorio Ruti y los documentos que te indique para construir el contexto inicial. Muéstrame qué vas a guardar, pide confirmación y crea el cuaderno con `brain_create_project`. Después recupera la memoria con `brain_get_context` y verifica que funciona.
+
+Ejemplo de investigación:
+
+> Investiga con NotebookLM los sistemas de reservas interurbanas para mi proyecto `ruti`. Arranca la investigación con `brain_start_research`, revisa las fuentes, y pídeme confirmación antes de importarlas al cuaderno.
+
+**Límites que siguen pendientes:** Aizens Brain no sincroniza por sí solo todos los commits de GitHub ni ejecuta tareas recurrentes en segundo plano. Para esos usos es necesario conectar un sincronizador o una automatización específica. La creación usa una operación de Google que no garantiza idempotencia entre dos llamadas simultáneas; antes de reintentar un error de creación, comprobar `brain_list_projects`. El modelo puede resumir información pero NotebookLM no sustituye a GitHub como fuente de verdad para el estado actual.
 
 ## Conectar en ChatGPT web
 
@@ -12,7 +38,7 @@
 3. **Authentication:** OAuth. Nuestro servidor publica descubrimiento automático en `/.well-known/oauth-protected-resource` y `/.well-known/oauth-authorization-server`.
 4. Confirma el aviso de seguridad e instala el complemento.
 5. En el inicio de sesión OAuth se abrirá una página **Aizens Brain** bajo el dominio `aizens-notebooklm.vercel.app`: introduce tu `NOTEBOOKLM_SERVER_TOKEN` **en ese formulario HTTPS, nunca en un chat**. Si prefieres una clave de autorización diferente, configura `AIZENS_BRAIN_LOGIN_SECRET` como variable secreta de Vercel y usa esa clave.
-6. Completa la autorización. La conexión queda limitada a las herramientas de lectura; consulta la información desde un chat escribiendo `@Aizens Brain`.
+6. Completa la autorización. Las operaciones de consulta utilizan `brain:read`, y crear o modificar memoria requiere también `brain:write` y confirmación explícita. En chats, utiliza `@Aizens Brain` cuando quieras trabajar con el complemento.
 
 **Importante:** la UI de creación e instalación depende del plan y los permisos de la cuenta. ChatGPT no acepta tokens Bearer fijos para conectores privados, por eso se implementó OAuth.
 
@@ -62,7 +88,7 @@ En la próxima etapa, el sincronizador documentado en `docs/AIZENS_TAREAS_AGENTE
 
 ## Seguridad y límites actuales
 
-- Solo lectura. El MCP no permite crear, modificar ni borrar cuadernos.
+- Permite creación de proyectos, adición de fuentes y pesquisas web de NotebookLM con el permiso explícito `brain:write`. **No permite borrar cuadernos.** Los agentes con token segregado siguen limitados a lectura.
 - No se expone el token maestro de Google al cliente.
 - OAuth usa PKCE S256, origen y URI de retorno restringidos a ChatGPT, cookies CSRF seguras, códigos con vida de 90 segundos y tokens HMAC firmados (acceso 1 h, renovación 30 días).
 - **Limitación de la versión privada inicial:** el sistema de códigos de autorización es *stateless* y no tiene registro persistente de canje único en distintas instancias de Vercel. PKCE + 90 s reducen el riesgo, pero para múltiples usuarios o uso crítico se necesita almacenamiento persistente de códigos/revocación, auditoría y límites de tasa. No usar como OAuth multiusuario público hasta completar ese trabajo.
