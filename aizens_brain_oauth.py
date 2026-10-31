@@ -18,6 +18,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 SCOPE = "brain:read"
+WRITE_SCOPE = "brain:read brain:write"
+ACCEPTED_SCOPES = (SCOPE, WRITE_SCOPE)
 BASE_DEFAULT = "https://aizens-notebooklm.vercel.app"
 PKCE_RE = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")
 CLIENT_RE = re.compile(r"^https://chatgpt\.com/oauth/([A-Za-z0-9_-]{6,160})/client\.json$")
@@ -73,7 +75,7 @@ def _verify(token, kind):
             or not isinstance(data.get("exp"), int)
             or data["iat"] > now + 30 or data["exp"] <= now
             or data.get("iss") != _base() or data.get("aud") != _resource()
-            or data.get("scope") != SCOPE
+            or data.get("scope") not in ACCEPTED_SCOPES
             or not _client_redirect_valid(data.get("client_id"), data.get("redirect_uri"))
         ):
             return None
@@ -83,6 +85,11 @@ def _verify(token, kind):
 
 def validate_oauth_access(token):
     return _verify(token, "access") is not None
+
+
+def get_oauth_access(token):
+    """Return scoped access claims or None. Do not accept access by boolean alone for writes."""
+    return _verify(token, "access")
 
 def _error(msg, status=400):
     return JSONResponse({"error": msg}, status_code=status, headers={"Cache-Control": "no-store"})
@@ -108,12 +115,12 @@ def _fields(params):
         or params.get("code_challenge_method") != "S256"
         or not PKCE_RE.fullmatch(challenge)
         or len(state) > 1024 or params.get("resource", _resource()) != _resource()
-        or params.get("scope", SCOPE) not in (SCOPE, "")
+        or params.get("scope", SCOPE) not in (*ACCEPTED_SCOPES, "")
     ):
         return None
     return {
         "client_id": client_id, "redirect_uri": redirect, "code_challenge": challenge,
-        "state": state, "resource": _resource(), "scope": SCOPE,
+        "state": state, "resource": _resource(), "scope": params.get("scope") or SCOPE,
     }
 
 def _form_ticket(fields):
@@ -124,6 +131,7 @@ def _form_ticket(fields):
         "aud": _resource(), "scope": SCOPE,
         "client_id": fields["client_id"], "redirect_uri": fields["redirect_uri"],
         "challenge": fields["code_challenge"], "state": fields["state"],
+        "scope": fields["scope"],
         "nonce": secrets.token_urlsafe(20),
     })
 
@@ -209,7 +217,7 @@ button:focus-visible{outline:3px solid #8dadff;outline-offset:3px}
 </div>
 <p class="eyebrow">CONEXIÓN SEGURA</p>
 <h1 id="page-title">Conecta tu memoria con ChatGPT</h1>
-<p class="intro">Autoriza a ChatGPT a consultar los cuadernos de NotebookLM disponibles en tu Aizens Brain.</p>
+<p class="intro">__INTRO__</p>
 __MESSAGE__
 <form action="/oauth/authorize" method="post" autocomplete="off">
 __FIELDS__
@@ -222,7 +230,14 @@ __FIELDS__
 </main>
 </body>
 </html>'''
-    return template.replace("__FIELDS__", hidden).replace("__MESSAGE__", message)
+    intro = (
+        "Autoriza a ChatGPT a consultar, crear y actualizar los proyectos "
+        "de tu Aizens Brain."
+        if fields.get("scope") == WRITE_SCOPE else
+        "Autoriza a ChatGPT a consultar los cuadernos de NotebookLM "
+        "disponibles en tu Aizens Brain."
+    )
+    return template.replace("__FIELDS__", hidden).replace("__MESSAGE__", message).replace("__INTRO__", intro)
 
 
 def _approval_page(redirect_url: str) -> str:
@@ -292,7 +307,7 @@ def _params(raw):
 def _issue(kind, fields, ttl):
     now = int(time.time())
     payload = {
-        "typ": kind, "iss": _base(), "aud": _resource(), "scope": SCOPE,
+        "typ": kind, "iss": _base(), "aud": _resource(), "scope": fields.get("scope", SCOPE),
         "iat": now, "exp": now + ttl,
         "client_id": fields["client_id"], "redirect_uri": fields["redirect_uri"],
         "jti": secrets.token_urlsafe(20),
@@ -309,7 +324,7 @@ def create_oauth_router():
     async def protected_resource():
         return JSONResponse({
             "resource": _resource(), "authorization_servers": [_base()],
-            "scopes_supported": [SCOPE],
+            "scopes_supported": [SCOPE, "brain:write"],
         }, headers={"Cache-Control": "no-store"})
 
     @router.get("/.well-known/oauth-authorization-server")
@@ -324,7 +339,7 @@ def create_oauth_router():
             "token_endpoint_auth_methods_supported": ["none"],
             "client_id_metadata_document_supported": True,
             "authorization_response_iss_parameter_supported": True,
-            "scopes_supported": [SCOPE],
+            "scopes_supported": [SCOPE, "brain:write"],
         }, headers={"Cache-Control": "no-store"})
 
     @router.get("/oauth/authorize")
@@ -353,6 +368,7 @@ def create_oauth_router():
             or ticket.get("redirect_uri") != fields["redirect_uri"]
             or ticket.get("challenge") != fields["code_challenge"]
             or ticket.get("state") != fields["state"]
+            or ticket.get("scope") != fields["scope"]
         ):
             return _html(_page({**fields, "response_type": "code",
                                 "code_challenge_method": "S256"}, error="session"), 403)
@@ -401,11 +417,11 @@ def create_oauth_router():
                 return _error("invalid_grant")
         else:
             return _error("unsupported_grant_type")
-        fields = {"client_id": claims["client_id"], "redirect_uri": claims["redirect_uri"]}
+        fields = {"client_id": claims["client_id"], "redirect_uri": claims["redirect_uri"], "scope": claims["scope"]}
         return JSONResponse({
             "access_token": _issue("access", fields, 3600), "token_type": "Bearer",
             "expires_in": 3600, "refresh_token": _issue("refresh", fields, 30 * 86400),
-            "scope": SCOPE,
+            "scope": claims["scope"],
         }, headers={"Cache-Control": "no-store"})
 
     return router
