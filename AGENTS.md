@@ -48,5 +48,6 @@ When the request concerns **Aizens Cerebro IA** or its shared NotebookLM memory 
 - [Common guide](docs/AIZENS_CEREBRO_IA_GUIA_MAESTRA_AGENTES_2026-10-31.md): architecture, source of truth, security, read-only API, acceptance gates.
 - [Agent assignment board](docs/AIZENS_TAREAS_AGENTES.md): roles A/B/C and orchestrator, exact deliverables, initial status.
 - [Per-project memory template](docs/AIZENS_PLANTILLA_MEMORIA_PROYECTO.md): versioned status, handoff and sync manifest.
+- [Private MCP for ChatGPT](docs/AIZENS_BRAIN_MCP_CHATGPT.md): remote URL, OAuth connection, tools and security limitations.
 
 **Important:** Vercel deployment READY is not evidence of authenticated NotebookLM access. Consult current GitHub HEAD and actual tests. Never place Google master tokens, API tokens, personal notebook IDs or confidential project material in this public repository. The fork has GitHub Issues disabled; use the assignment document until a supported private tracker is explicitly chosen. The roles listed are tasks to assign, not agents already running.
