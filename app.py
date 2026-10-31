@@ -218,3 +218,18 @@ app.include_router(
     ),
     prefix="/mcp",
 )
+
+# Separate endpoint identity forces clients that cached v1 tool schemas to
+# discover the actual ten-tool contract on a fresh app connection.
+app.include_router(
+    create_router(
+        _brain_ask_notebook, _brain_list_notebooks,
+        create_notebook=_brain_create_notebook,
+        add_text=_brain_add_text,
+        research_start=_brain_research_start,
+        research_poll=_brain_research_poll,
+        research_import=_brain_research_import,
+        resource_path="/mcp-v2",
+    ),
+    prefix="/mcp-v2",
+)
