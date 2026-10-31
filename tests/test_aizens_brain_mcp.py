@@ -145,7 +145,7 @@ def test_write_operations_require_write_oauth_scope(client, monkeypatch):
     c, calls = client
     monkeypatch.setenv("NOTEBOOKLM_SERVER_TOKEN", "a" * 48)
     # Mock a valid read-only session; it must not become a writer after upgrade.
-    def read_only_claims(token):
+    def read_only_claims(token, *, resource="/mcp"):
         return {"scope": "brain:read"}
     monkeypatch.setattr("aizens_brain_oauth.get_oauth_access", read_only_claims)
     status, result = tool(
