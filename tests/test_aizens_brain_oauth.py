@@ -4,6 +4,7 @@ Use: pytest -q tests/test_aizens_brain_oauth.py
 """
 import base64
 import hashlib
+import re
 from urllib.parse import urlparse, parse_qs
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -36,6 +37,27 @@ def _fields():
     }
 
 
+def extract_ticket(page):
+    match = re.search(r'name="form_ticket" value="([^"]+)"', page.text)
+    assert match
+    return match.group(1)
+
+
+def make_form(app, fields):
+    page = app.get("/oauth/authorize", params=fields)
+    assert page.status_code == 200
+    return {**fields, "form_ticket": extract_ticket(page)}
+
+
+def test_authorization_screen_is_simple(app):
+    page = app.get("/oauth/authorize", params=_fields())
+    assert page.status_code == 200
+    assert "Acceso de solo lectura" not in page.text
+    assert "aizens <span>/ brain" not in page.text
+    assert "Nunca se envía al chat" not in page.text
+    assert "Conecta tu memoria con ChatGPT" in page.text
+
+
 def test_metadata_and_discovery(app):
     auth = app.get("/.well-known/oauth-authorization-server").json()
     resource = app.get("/.well-known/oauth-protected-resource").json()
@@ -50,11 +72,16 @@ def test_auth_code_pkce_access_and_refresh(app):
     assert page.status_code == 200
     assert page.headers["cache-control"] == "no-store"
     assert "aizens_oauth_csrf" in app.cookies
-    res = app.post("/oauth/authorize", data={**fields, "password": "a" * 48},
+    res = app.post("/oauth/authorize", data={**fields, "form_ticket": extract_ticket(page), "password": "a" * 48},
                    follow_redirects=False)
-    assert res.status_code == 302
-    code = parse_qs(urlparse(res.headers["location"]).query)["code"][0]
-    assert parse_qs(urlparse(res.headers["location"]).query)["state"] == ["test-request"]
+    assert res.status_code == 200
+    assert "Conexión autorizada" in res.text
+    assert "Continuar en ChatGPT" in res.text
+    match = re.search(r'href=\'([^\']+)\'', res.text)
+    assert match
+    from html import unescape
+    code = parse_qs(urlparse(unescape(match.group(1))).query)["code"][0]
+    assert parse_qs(urlparse(unescape(match.group(1))).query)["state"] == ["test-request"]
     exchanged = app.post("/oauth/token", data={
         "grant_type": "authorization_code", "code": code,
         "code_verifier": "x" * 64, "client_id": fields["client_id"],
@@ -73,17 +100,20 @@ def test_auth_code_pkce_access_and_refresh(app):
 
 def test_wrong_password_no_redirect(app):
     fields = _fields()
-    assert app.get("/oauth/authorize", params=fields).status_code == 200
-    assert app.post("/oauth/authorize", data={**fields, "password": "wrong"},
+    form = make_form(app, fields)
+    assert app.post("/oauth/authorize", data={**form, "password": "wrong"},
                     follow_redirects=False).status_code == 401
 
 
 def test_wrong_pkce_verifier_rejected(app):
     fields = _fields()
-    app.get("/oauth/authorize", params=fields)
-    res = app.post("/oauth/authorize", data={**fields, "password": "a" * 48},
+    form = make_form(app, fields)
+    res = app.post("/oauth/authorize", data={**form, "password": "a" * 48},
                    follow_redirects=False)
-    code = parse_qs(urlparse(res.headers["location"]).query)["code"][0]
+    from html import unescape
+    match = re.search(r'href=\'([^\']+)\'', res.text)
+    assert match
+    code = parse_qs(urlparse(unescape(match.group(1))).query)["code"][0]
     bad = app.post("/oauth/token", data={
         "grant_type": "authorization_code", "code": code,
         "code_verifier": "z" * 64, "client_id": fields["client_id"],
