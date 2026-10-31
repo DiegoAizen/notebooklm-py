@@ -30,8 +30,14 @@ def _base():
         raise HTTPException(503, "OAuth public origin configuration invalid")
     return url
 
-def _resource():
-    return _base() + "/mcp"
+def _resource(path="/mcp"):
+    if path not in ("/mcp", "/mcp-v2"):
+        raise ValueError("Unsupported MCP resource path")
+    return _base() + path
+
+
+def _resources():
+    return {_resource("/mcp"), _resource("/mcp-v2")}
 
 def _key():
     secret = os.getenv("NOTEBOOKLM_SERVER_TOKEN", "").strip()
@@ -58,7 +64,7 @@ def _client_redirect_valid(client_id, redirect):
     match = CLIENT_RE.fullmatch(client_id)
     return bool(match and redirect == "https://chatgpt.com/connector/oauth/" + match.group(1))
 
-def _verify(token, kind):
+def _verify(token, kind, *, resource=None):
     try:
         if not isinstance(token, str) or len(token) > 6000:
             return None
@@ -74,7 +80,9 @@ def _verify(token, kind):
             or not isinstance(data.get("iat"), int)
             or not isinstance(data.get("exp"), int)
             or data["iat"] > now + 30 or data["exp"] <= now
-            or data.get("iss") != _base() or data.get("aud") != _resource()
+            or data.get("iss") != _base()
+            or data.get("aud") not in _resources()
+            or (resource is not None and data.get("aud") != _resource(resource))
             or data.get("scope") not in ACCEPTED_SCOPES
             or not _client_redirect_valid(data.get("client_id"), data.get("redirect_uri"))
         ):
@@ -87,9 +95,9 @@ def validate_oauth_access(token):
     return _verify(token, "access") is not None
 
 
-def get_oauth_access(token):
-    """Return scoped access claims or None. Do not accept access by boolean alone for writes."""
-    return _verify(token, "access")
+def get_oauth_access(token, *, resource="/mcp"):
+    """Validate audience and scopes for the exact MCP endpoint requested."""
+    return _verify(token, "access", resource=resource)
 
 def _error(msg, status=400):
     return JSONResponse({"error": msg}, status_code=status, headers={"Cache-Control": "no-store"})
@@ -121,12 +129,13 @@ def _fields(params):
         or params.get("response_type") != "code"
         or params.get("code_challenge_method") != "S256"
         or not PKCE_RE.fullmatch(challenge)
-        or len(state) > 1024 or params.get("resource", _resource()) != _resource()
+        or len(state) > 1024 or params.get("resource", _resource()) not in _resources()
     ):
         return None
     return {
         "client_id": client_id, "redirect_uri": redirect, "code_challenge": challenge,
-        "state": state, "resource": _resource(), "scope": normalized_scope,
+        "state": state, "resource": params.get("resource", _resource()),
+        "scope": normalized_scope,
     }
 
 def _form_ticket(fields):
@@ -134,7 +143,7 @@ def _form_ticket(fields):
     now = int(time.time())
     return _sign({
         "typ": "form", "iat": now, "exp": now + 600, "iss": _base(),
-        "aud": _resource(), "scope": SCOPE,
+        "aud": fields["resource"], "scope": SCOPE,
         "client_id": fields["client_id"], "redirect_uri": fields["redirect_uri"],
         "challenge": fields["code_challenge"], "state": fields["state"],
         "scope": fields["scope"],
@@ -313,7 +322,7 @@ def _params(raw):
 def _issue(kind, fields, ttl):
     now = int(time.time())
     payload = {
-        "typ": kind, "iss": _base(), "aud": _resource(), "scope": fields.get("scope", SCOPE),
+        "typ": kind, "iss": _base(), "aud": fields.get("resource", _resource()), "scope": fields.get("scope", SCOPE),
         "iat": now, "exp": now + ttl,
         "client_id": fields["client_id"], "redirect_uri": fields["redirect_uri"],
         "jti": secrets.token_urlsafe(20),
@@ -330,6 +339,14 @@ def create_oauth_router():
     async def protected_resource():
         return JSONResponse({
             "resource": _resource(), "authorization_servers": [_base()],
+            "scopes_supported": ["brain:read", "brain:write"],
+        }, headers={"Cache-Control": "no-store"})
+
+    @router.get("/.well-known/oauth-protected-resource/mcp-v2")
+    async def protected_resource_v2():
+        return JSONResponse({
+            "resource": _resource("/mcp-v2"),
+            "authorization_servers": [_base()],
             "scopes_supported": ["brain:read", "brain:write"],
         }, headers={"Cache-Control": "no-store"})
 
@@ -375,6 +392,7 @@ def create_oauth_router():
             or ticket.get("challenge") != fields["code_challenge"]
             or ticket.get("state") != fields["state"]
             or ticket.get("scope") != fields["scope"]
+            or ticket.get("aud") != fields["resource"]
         ):
             return _html(_page({**fields, "response_type": "code",
                                 "code_challenge_method": "S256"}, error="session"), 403)
@@ -402,7 +420,7 @@ def create_oauth_router():
         if request.headers.get("content-type", "").split(";")[0].strip() != "application/x-www-form-urlencoded":
             return _error("invalid_request")
         params = _params(await request.body())
-        if params is None or params.get("resource", _resource()) != _resource():
+        if params is None or params.get("resource", _resource()) not in _resources():
             return _error("invalid_request")
         grant = params.get("grant_type")
         if grant == "authorization_code":
@@ -423,7 +441,14 @@ def create_oauth_router():
                 return _error("invalid_grant")
         else:
             return _error("unsupported_grant_type")
-        fields = {"client_id": claims["client_id"], "redirect_uri": claims["redirect_uri"], "scope": claims["scope"]}
+        if "resource" in params and params["resource"] != claims["aud"]:
+            return _error("invalid_grant")
+        fields = {
+            "client_id": claims["client_id"],
+            "redirect_uri": claims["redirect_uri"],
+            "scope": claims["scope"],
+            "resource": claims["aud"],
+        }
         return JSONResponse({
             "access_token": _issue("access", fields, 3600), "token_type": "Bearer",
             "expires_in": 3600, "refresh_token": _issue("refresh", fields, 30 * 86400),
