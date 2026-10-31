@@ -1,3 +1,4 @@
 # Keep the deployed library tied to this GitHub fork, not an unrelated PyPI version.
 -e .[headless,mcp]
 fastapi>=0.118,<1
+fastmcp==4.1.0
