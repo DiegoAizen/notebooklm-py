@@ -61,7 +61,7 @@ def test_initialize_and_list(client):
     response = request(c, "initialize", params={"protocolVersion": "2025-06-18"})
     assert response.json()["result"]["capabilities"]["tools"] == {"listChanged": False}
     names = [x["name"] for x in request(c, "tools/list").json()["result"]["tools"]]
-    assert names == ["brain_list_projects", "brain_get_context", "brain_ask_project"]
+    assert names == ["brain_list_notebooks", "brain_ask_notebook", "brain_list_projects", "brain_get_context", "brain_ask_project"]
     headers = {"Authorization": "Bearer owner-key-123"}
     assert c.post("/mcp",
                   json={"jsonrpc": "2.0", "method": "notifications/initialized"},
