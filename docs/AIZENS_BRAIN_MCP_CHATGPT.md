@@ -6,6 +6,29 @@
 **Objetivo:** recuperar memoria documental de NotebookLM sin compartir el token maestro de Google con ChatGPT.
 
 
+## IMPORTANTE — Migración del complemento antiguo de solo lectura
+
+Los MCP instalados antes de habilitar las herramientas de escritura pueden
+mantener una **lista de herramientas antigua almacenada en ChatGPT**. Volver
+a autorizar una sesión no siempre actualiza los esquemas de las herramientas.
+
+**Actualización necesaria en ChatGPT web:**
+
+1. Quitar la conexión personalizada antigua de Aizens Brain del catálogo.
+2. Añadirla de nuevo con la misma URL `https://aizens-notebooklm.vercel.app/mcp`.
+3. Autorizar la nueva conexión con permisos `brain:read` y `brain:write`
+   en la página HTTPS de Vercel. Nunca compartir credenciales por chat.
+4. Comprobar que ChatGPT muestra `brain_create_project`,
+   `brain_add_memory` y `brain_start_research`, además de
+   `brain_list_notebooks`. Si solo muestra las cinco funciones antiguas,
+   **el complemento no se ha actualizado** y no puede escribir.
+5. Crear un proyecto de prueba autorizado desde el chat y comprobar de nuevo
+   `brain_list_notebooks` y el listado en NotebookLM. Una guía generada
+   sin invocar `brain_create_project` **NO es una creación real**.
+
+La conexión de solo lectura actual seguirá pudiendo consultar, pero no puede
+escribir por diseño.
+
 ## Crear proyectos desde el chat (nuevo)
 
 **No hace falta editar Vercel para dar de alta cada proyecto.** Los proyectos creados por Aizens Brain tienen un cuaderno propio de NotebookLM con título `Aizens · slug · título`. El servidor descubre esos cuadernos al listar la cuenta de NotebookLM; la memoria se guarda como fuentes de texto reales.
