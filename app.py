@@ -22,6 +22,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from notebooklm import NotebookLMClient
+from notebooklm._auth.master_token import bootstrap_missing_storage_from_master_token
 from notebooklm._app.views import ask_result_view, notebook_view
 
 _LOG = logging.getLogger("aizens.vercel")
@@ -87,6 +88,17 @@ def _prepare_auth() -> None:
         raise HTTPException(503, "Google authentication configuration invalid") from None
 
 
+async def _ensure_session() -> None:
+    """Mint Web cookies on a cold Vercel start from the stored master token.
+
+    The master token alone is not a Playwright storage_state.json. The
+    from_storage() loader still needs the cookie file before it can refresh
+    and query Google. The upstream bootstrap handles cross-request locking.
+    """
+    storage_path = _HOME / "profiles" / _PROFILE / "storage_state.json"
+    await bootstrap_missing_storage_from_master_token(storage_path)
+
+
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=8000)
     conversation_id: str | None = Field(default=None, max_length=256)
@@ -102,6 +114,7 @@ def healthz() -> dict[str, bool]:
 async def list_notebooks():
     _prepare_auth()
     try:
+        await _ensure_session()
         async with NotebookLMClient.from_storage(profile=_PROFILE) as client:
             return {"notebooks": [notebook_view(nb) for nb in await client.notebooks.list()]}
     except Exception as exc:
@@ -115,6 +128,7 @@ async def ask_notebook(notebook_id: str, body: AskRequest):
         raise HTTPException(422, "Invalid notebook ID")
     _prepare_auth()
     try:
+        await _ensure_session()
         async with NotebookLMClient.from_storage(profile=_PROFILE) as client:
             result = await client.chat.ask(
                 notebook_id, body.question, conversation_id=body.conversation_id
