@@ -23,7 +23,8 @@ from pydantic import BaseModel, Field
 
 from notebooklm import NotebookLMClient
 from notebooklm._auth.master_token import bootstrap_missing_storage_from_master_token
-from notebooklm._app.views import ask_result_view, notebook_view
+from notebooklm._app.views import ask_result_view, notebook_view, source_view
+from notebooklm._app.serialize import to_jsonable
 
 _LOG = logging.getLogger("aizens.vercel")
 _HOME = Path("/tmp/aizens-notebooklm")
@@ -161,4 +162,59 @@ async def _brain_list_notebooks() -> list[dict]:
 
 
 app.include_router(create_oauth_router())
-app.include_router(create_router(_brain_ask_notebook, _brain_list_notebooks), prefix="/mcp")
+
+async def _brain_create_notebook(title: str) -> dict:
+    _prepare_auth()
+    await _ensure_session()
+    async with NotebookLMClient.from_storage(profile=_PROFILE) as client:
+        notebook = await client.notebooks.create(title)
+        return notebook_view(notebook)
+
+
+async def _brain_add_text(notebook_id: str, title: str, content: str) -> dict:
+    _prepare_auth()
+    await _ensure_session()
+    async with NotebookLMClient.from_storage(profile=_PROFILE) as client:
+        source = await client.sources.add_text(
+            notebook_id, title, content, wait=True, idempotent=True
+        )
+        return source_view(source)
+
+
+async def _brain_research_start(notebook_id: str, query: str, mode: str) -> dict:
+    _prepare_auth()
+    await _ensure_session()
+    async with NotebookLMClient.from_storage(profile=_PROFILE) as client:
+        return to_jsonable(await client.research.start(
+            notebook_id, query, source="web", mode=mode
+        ))
+
+
+async def _brain_research_poll(notebook_id: str, task_id: str) -> dict:
+    _prepare_auth()
+    await _ensure_session()
+    async with NotebookLMClient.from_storage(profile=_PROFILE) as client:
+        return to_jsonable(await client.research.poll(notebook_id, task_id))
+
+
+async def _brain_research_import(notebook_id: str, task_id: str, sources: list[dict]) -> list[dict]:
+    _prepare_auth()
+    await _ensure_session()
+    async with NotebookLMClient.from_storage(profile=_PROFILE) as client:
+        result = await client.research.import_sources(
+            notebook_id, task_id, sources
+        )
+        return to_jsonable(result)
+
+
+app.include_router(
+    create_router(
+        _brain_ask_notebook, _brain_list_notebooks,
+        create_notebook=_brain_create_notebook,
+        add_text=_brain_add_text,
+        research_start=_brain_research_start,
+        research_poll=_brain_research_poll,
+        research_import=_brain_research_import,
+    ),
+    prefix="/mcp",
+)
