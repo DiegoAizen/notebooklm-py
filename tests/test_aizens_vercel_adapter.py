@@ -3,6 +3,7 @@
 Ejecución en el fork: uv run pytest tests/test_aizens_vercel_adapter.py -q
 No accede a Google ni necesita credenciales; NO sustituye al smoke test remoto.
 """
+import asyncio
 import json
 import stat
 from types import SimpleNamespace
@@ -98,6 +99,9 @@ def fake_google(monkeypatch):
     monkeypatch.setenv("NOTEBOOKLM_MASTER_TOKEN_JSON", _master())
     monkeypatch.setattr(target, "notebook_view", lambda item: item)
     monkeypatch.setattr(target, "ask_result_view", lambda result: result)
+    async def fake_session():
+        return None
+    monkeypatch.setattr(target, "_ensure_session", fake_session)
     factory = lambda **kwargs: MockBackend()
     monkeypatch.setattr(target.NotebookLMClient, "from_storage", staticmethod(factory))
 
@@ -119,6 +123,9 @@ def test_authenticated_list_and_chat_with_fake_google(api, fake_google):
 
 def test_upstream_errors_do_not_leak_details(api, monkeypatch):
     monkeypatch.setenv("NOTEBOOKLM_MASTER_TOKEN_JSON", _master())
+    async def fake_session():
+        return None
+    monkeypatch.setattr(target, "_ensure_session", fake_session)
     monkeypatch.setattr(target.NotebookLMClient, "from_storage", staticmethod(
         lambda **kwargs: MockBackend(failing=True)
     ))
@@ -137,3 +144,27 @@ def test_question_validation_and_id_length(api, fake_google):
         headers=_headers(),
         json={"question": "hola"},
     ).status_code == 422
+
+
+def test_cold_start_bootstraps_cookie_storage_from_master(api, monkeypatch, tmp_path):
+    calls = []
+
+    async def bootstrap(path):
+        calls.append(path)
+        return True
+
+    monkeypatch.setattr(target, "bootstrap_missing_storage_from_master_token", bootstrap)
+    asyncio.run(target._ensure_session())
+    assert calls == [tmp_path / "profiles" / "test" / "storage_state.json"]
+
+
+def test_cold_start_bootstrap_failure_is_sanitized(api, monkeypatch):
+    monkeypatch.setenv("NOTEBOOKLM_MASTER_TOKEN_JSON", _master())
+
+    async def failing_session():
+        raise RuntimeError("FICTIONAL-SECRET-MUST-NOT-LEAK")
+
+    monkeypatch.setattr(target, "_ensure_session", failing_session)
+    response = api.get("/v1/notebooks", headers=_headers())
+    assert response.status_code == 502
+    assert "FICTIONAL-SECRET-MUST-NOT-LEAK" not in response.text
