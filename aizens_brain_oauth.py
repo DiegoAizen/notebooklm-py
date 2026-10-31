@@ -330,7 +330,7 @@ def create_oauth_router():
     async def protected_resource():
         return JSONResponse({
             "resource": _resource(), "authorization_servers": [_base()],
-            "scopes_supported": [SCOPE, "brain:write"],
+            "scopes_supported": ["brain:read", "brain:write"],
         }, headers={"Cache-Control": "no-store"})
 
     @router.get("/.well-known/oauth-authorization-server")
@@ -345,7 +345,7 @@ def create_oauth_router():
             "token_endpoint_auth_methods_supported": ["none"],
             "client_id_metadata_document_supported": True,
             "authorization_response_iss_parameter_supported": True,
-            "scopes_supported": [SCOPE, "brain:write"],
+            "scopes_supported": ["brain:read", "brain:write"],
         }, headers={"Cache-Control": "no-store"})
 
     @router.get("/oauth/authorize")
