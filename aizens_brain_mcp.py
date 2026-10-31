@@ -287,7 +287,7 @@ def create_router(
             401,
             "Authentication required",
             headers={
-                "WWW-Authenticate": f'Bearer resource_metadata="{metadata}", scope="brain:read"',
+                "WWW-Authenticate": f'Bearer resource_metadata="{metadata}", scope="brain:read brain:write"',
                 "Cache-Control": "no-store",
             },
         )
