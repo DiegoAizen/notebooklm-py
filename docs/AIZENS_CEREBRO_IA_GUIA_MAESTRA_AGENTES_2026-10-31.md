@@ -3,7 +3,7 @@
 **Versión:** 1.0 · **Fecha:** 2026-10-31  
 **Alcance:** sistema de memoria documental consultable por agentes, aplicable a cualquier proyecto.  
 **Repositorio del adaptador:** [DiegoAizen/notebooklm-py](https://github.com/DiegoAizen/notebooklm-py)  
-**Servicio Vercel:** `aizens-notebooklm` · **Estado de integración:** parcial, **NO validado de extremo a extremo**.
+**Servicio Vercel:** `aizens-notebooklm` · **Estado de integración:** API de lectura **validada E2E el 2026-10-31**; sincronización de proyectos y agentes aún pendientes.
 
 > Este documento es una guía general. NO contiene contraseñas, datos privados de proyectos, credenciales ni identificadores de cuadernos reales. Los agentes deben leerlo al incorporarse.
 
@@ -24,11 +24,11 @@ NotebookLM **no sustituye a GitHub, al código, a los tests ni al orquestador**.
 | --- | --- | --- |
 | Termux → Debian → `notebooklm-py` | En la sesión local previa se consultó un cuaderno con respuesta y referencias; el usuario conserva instalación y perfil. | Funcionamiento permanente, reautenticación futura o acceso a todos los cuadernos. |
 | GitHub | Fork `DiegoAizen/notebooklm-py` conectado al proyecto Vercel. | Sincronización automática de cada repositorio de producto. |
-| Vercel | Último despliegue de producción visto en estado `READY`; aplicación FastAPI en `app.py`. | Consulta real con credenciales, renovación de sesión, tolerancia a reinicios o carga. |
-| API | Existen `GET /healthz`, `GET /v1/notebooks` y `POST /v1/notebooks/{notebook_id}/chat`. Las rutas de datos exigen Bearer. | Que `/healthz` implique acceso válido a Google; NO lo implica. |
+| Vercel | Producción `READY`, `GET /healthz` 200 y consulta E2E autenticada verificada mediante `scripts/aizens_vercel_smoke.py` el 2026-10-31. | Carga concurrente, tolerancia a fallos de Google, renovación a largo plazo y reintentos. |
+| API | `GET /healthz` 200, token inválido 401, `GET /v1/notebooks` autenticado 200 (9 cuadernos), `POST /v1/notebooks/{id}/chat` 200 con respuesta no vacía y 3 referencias (prueba reportada por el propietario el 2026-10-31). | `/healthz` por sí solo NO valida Google; falta revisión de seguridad y test periódico. |
 | Memoria compartida | Diseño propuesto en esta guía. | Cuadernos creados por proyecto, cargas y actualizaciones automatizadas. |
 
-**Riesgo técnico a resolver antes de producción:** `app.py` materializa `master_token.json` pero llama a `NotebookLMClient.from_storage(profile="vercel")` sin seleccionar `backend="android"`. La biblioteca usa Web por defecto; la documentación del backend Android exige selección explícita y dependencias propias. Verificar compatibilidad de la inicialización, dependencias, arranque sin cookies y pruebas reales. **No corregirlo a ciegas ni declararlo funcionando solo por un deploy READY.**
+**Corrección E2E aplicada:** `app.py` inicializa `storage_state.json` de manera controlada a partir de `master_token.json` antes de llamar al backend Web (`a84ba96`); pruebas adicionales en `f5e2deb`. Tras desplegar, el propietario ejecutó `scripts/aizens_vercel_smoke.py` con resultados PASS en salud, rechazo 401, listado de 9 cuadernos y `POST /chat` con 3 referencias. **Quedan sin validar** resiliencia a largo plazo, concurrencia, límites y revisión completa de seguridad.
 
 **Ubicaciones útiles:** `app.py`, `requirements.txt`, `vercel.json`, `VERCEL_SETUP.md`, `docs/android/README.md`, `src/notebooklm/`.
 
@@ -153,9 +153,9 @@ Mantener issues, asignación de archivos, conflictos y dependencias. Revisar ent
 
 ## 8. Definición de listo (gates, no promesas)
 
-- [ ] G1: API responde `/healthz` desde el dominio definitivo y protegido según diseño.
+- [x] G1: API responde `/healthz` desde el dominio definitivo (`200` comprobado).
 - [ ] G2: La API deniega peticiones sin Bearer; no filtra contenido o credenciales.
-- [ ] G3: Una consulta autenticada a un **cuaderno de prueba** devuelve respuesta con referencias desde Vercel.
+- [x] G3: Una consulta autenticada a un cuaderno accesible devuelve respuesta con 3 referencias desde Vercel (E2E reportada el 2026-10-31).
 - [ ] G4: El backend de credenciales y su renovación sobreviven arranque frío/reinicio.
 - [ ] G5: Al menos un proyecto piloto tiene `docs/estado` versionado y cuaderno separado.
 - [ ] G6: Prueba de sincronización: GitHub commit nuevo → fuente actualizada → pregunta verificable, sin duplicados.
@@ -170,7 +170,7 @@ Mantener issues, asignación de archivos, conflictos y dependencias. Revisar ent
 
 ## 10. Arranque recomendado
 
-**En paralelo desde ahora:** A investiga y prueba API; B diseña memoria con fixtures; C crea cliente con mocks. El orquestador revisa.  
-**Secuencia de integración:** primero seguridad y consulta real (A), luego piloto de memoria y sincronización (B), finalmente cliente real y relevo integral (C + QA).
+**En paralelo desde ahora:** A revisa seguridad, robustez y tests de la API E2E ya funcional; B diseña memoria con fixtures; C integra cliente con mocks y después contra la API validada. El orquestador revisa.  
+**Secuencia de integración:** consulta real ya validada; completar seguridad y fiabilidad (A), piloto de memoria y sincronización (B), cliente real y relevo integral (C + QA).
 
 No hay agentes trabajando automáticamente por el hecho de crear este documento o issues; hay que asignarles los encargos en sus sesiones/agentes.
