@@ -1,11 +1,12 @@
-"""Aizens Brain: stateless, read-only MCP JSON-RPC adapter for existing FastAPI.
+"""Aizens Brain: MCP JSON-RPC adapter for persistent NotebookLM project memory.
 
-This endpoint deliberately does *not* implement an OAuth authorization server.
-It is for trusted agent runners that can send a Bearer header. Connecting a
-private ChatGPT plugin requires an OAuth-capable gateway and account access.
+Read access works through an OAuth or scoped agent token. A separate OAuth
+module owns authorization; project write operations require a grant including
+brain:write plus an explicit confirmation parameter.
 
-All memory queries are limited by a server-side project-to-notebook mapping.
-No API method accepts arbitrary notebook IDs from callers.
+New project IDs are derived from dedicated NotebookLM notebook titles and
+persist across Vercel cold starts without editing environment variables.
+NotebookLM source content is untrusted data, never executable instruction.
 """
 from __future__ import annotations
 
