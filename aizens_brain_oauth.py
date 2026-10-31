@@ -116,31 +116,151 @@ def _fields(params):
         "state": state, "resource": _resource(), "scope": SCOPE,
     }
 
+def _form_ticket(fields):
+    """Bind a signed 10-minute approval intent to this exact OAuth request."""
+    now = int(time.time())
+    return _sign({
+        "typ": "form", "iat": now, "exp": now + 600, "iss": _base(),
+        "aud": _resource(), "scope": SCOPE,
+        "client_id": fields["client_id"], "redirect_uri": fields["redirect_uri"],
+        "challenge": fields["code_challenge"], "state": fields["state"],
+        "nonce": secrets.token_urlsafe(20),
+    })
+
+
 def _page(fields, error=False):
+    """Accessible, mobile-first authorization view with no external assets/JS."""
+    safe_fields = {**fields, "form_ticket": _form_ticket(fields)}
     hidden = "\n".join(
-        '<input type="hidden" name="%s" value="%s">' % (html.escape(k), html.escape(v, quote=True))
-        for k, v in fields.items()
+        '<input type="hidden" name="%s" value="%s">' % (
+            html.escape(k, quote=True), html.escape(v, quote=True),
+        )
+        for k, v in safe_fields.items()
     )
-    message = '<p role="alert">Clave incorrecta. Vuelve a intentarlo.</p>' if error else ""
-    return f'''<!doctype html><html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Aizens Brain · Autorizar</title>
-<style>body{{font:16px system-ui,sans-serif;max-width:450px;margin:10vh auto;padding:24px;line-height:1.5}}
-input[type=password]{{display:block;width:100%;box-sizing:border-box;padding:12px;margin:12px 0}}
-button{{padding:12px 18px;cursor:pointer}}small{{color:#555}}</style></head>
-<body><h1>🧠 Aizens Brain</h1>
-<p>Autoriza a ChatGPT a consultar tu memoria privada de NotebookLM.</p>
-<p>Acceso <strong>solo lectura</strong>, sin compartir tus credenciales de Google.</p>
-{message}<form method="post" action="/oauth/authorize">{hidden}
-<label for="password">Clave privada de Aizens Brain</label>
-<input id="password" type="password" name="password" autocomplete="off" required autofocus>
-<button type="submit">Autorizar ChatGPT</button></form>
-<p><small>Utiliza tu NOTEBOOKLM_SERVER_TOKEN o, si la configuraste,
-AIZENS_BRAIN_LOGIN_SECRET. No envíes esta clave en un chat.</small></p></body></html>'''
+    message = (
+        '<div class="alert" role="alert">La clave no es correcta. '
+        'Compruébala e inténtalo de nuevo.</div>'
+        if error is True else (
+            '<div class="alert" role="alert">La sesión de autorización ha caducado '
+            'o tu navegador la bloqueó. Vuelve a iniciar la conexión desde ChatGPT.</div>'
+            if error == "session" else ""
+        )
+    )
+    template = '''<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6f8fc">
+<meta name="robots" content="noindex,nofollow">
+<title>Autorizar acceso · Aizens Brain</title>
+<style>
+:root{color-scheme:light;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+*{box-sizing:border-box}
+html{min-height:100%;background:#f6f8fc}
+body{margin:0;min-height:100vh;min-height:100dvh;color:#14213c;background:
+ radial-gradient(ellipse 380px 310px at 10% 5%,#dceaffb5,transparent 95%),
+ radial-gradient(ellipse 350px 260px at 90% 92%,#e7ddff80,transparent 95%),
+ #f6f8fc;display:flex;flex-direction:column}
+.topbar{width:min(100%,1040px);margin:0 auto;padding:23px clamp(20px,4vw,48px);display:flex;align-items:center;gap:11px}
+.wordmark{font-size:14px;font-weight:750;letter-spacing:-.4px;color:#172643}
+.wordmark span{font-weight:450;color:#6a7890;margin-left:4px}
+.mini-mark{width:30px;height:30px;display:grid;place-items:center;border-radius:10px;
+ background:linear-gradient(145deg,#3068d9,#654de2);color:#fff;font-size:18px;font-weight:800}
+main{display:flex;flex:1;justify-content:center;align-items:center;padding:20px 18px 42px}
+.card{position:relative;width:min(100%,475px);padding:clamp(25px,5vw,43px);
+ background:#fff;border:1px solid #e5eaf3;border-radius:24px;
+ box-shadow:0 22px 75px #243b7015,0 4px 14px #243b7008}
+.mark{width:64px;height:64px;border-radius:20px;display:grid;place-items:center;
+ margin-bottom:26px;background:linear-gradient(145deg,#2b73e9,#7253e7);
+ box-shadow:0 10px 24px #4164d739;color:#fff}
+.mark svg{width:38px;height:38px}
+.eyebrow{font-size:11px;font-weight:800;letter-spacing:2px;color:#5679c0;margin:0 0 9px}
+h1{font-size:clamp(27px,5vw,33px);font-weight:760;letter-spacing:-1.2px;
+ line-height:1.17;margin:0 0 13px;color:#14213c}
+.intro{font-size:15px;line-height:1.65;color:#65728a;margin:0 0 23px}
+.permissions{border:1px solid #e9edf5;border-radius:15px;background:#fafbfe;
+ padding:15px 16px;display:flex;align-items:center;gap:13px;margin-bottom:27px}
+.permission-icon{flex:0 0 34px;width:34px;height:34px;border-radius:10px;
+ display:grid;place-items:center;background:#eaf7ef;color:#21865b;font-size:19px}
+.permissions strong{display:block;font-size:13px;color:#263956;margin-bottom:2px}
+.permissions small{display:block;color:#75839a;font-size:12px;line-height:1.4}
+label{display:block;font-size:13px;font-weight:700;color:#273753;margin-bottom:9px}
+input[type=password]{display:block;width:100%;height:54px;border:1.5px solid #d9e1ee;
+ border-radius:13px;background:#fff;color:#1d2b46;padding:0 16px;
+ font:inherit;font-size:16px;outline:none;transition:border-color .15s,box-shadow .15s}
+input[type=password]:focus{border-color:#426bdd;box-shadow:0 0 0 4px #426bdd19}
+input[type=password]::placeholder{color:#a1abba}
+.hint{color:#78859c;font-size:12px;line-height:1.55;margin:9px 0 20px}
+button{width:100%;min-height:54px;border:none;border-radius:13px;
+ display:flex;justify-content:center;align-items:center;gap:12px;
+ background:#264fd3;color:white;font:inherit;font-size:15px;font-weight:730;
+ cursor:pointer;transition:transform .15s,background .15s,box-shadow .15s;
+ box-shadow:0 9px 20px #2c57db35}
+button:hover{background:#1d43c1;box-shadow:0 12px 25px #2c57db40}
+button:active{transform:translateY(1px)}
+button:focus-visible{outline:3px solid #8dadff;outline-offset:3px}
+.arrow{font-size:20px;font-weight:400}
+.alert{padding:13px 15px;margin:0 0 18px;border-radius:12px;background:#fff3f2;
+ color:#a03532;border:1px solid #f2d0cd;font-size:13px;line-height:1.5}
+.trust{display:flex;align-items:center;justify-content:center;gap:7px;
+ margin:23px 0 0;color:#8190a5;font-size:12px;text-align:center}
+.trust svg{width:15px;height:15px;flex:none}
+footer{color:#8995aa;font-size:12px;text-align:center;padding:0 14px calc(21px + env(safe-area-inset-bottom));line-height:1.5}
+@media(max-width:480px){.topbar{padding:21px 23px}.card{border-radius:20px}.mark{margin-bottom:22px}main{align-items:center;padding:18px 15px 33px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header class="topbar">
+<div class="mini-mark" aria-hidden="true">✦</div>
+<div class="wordmark">aizens <span>/ brain</span></div>
+</header>
+<main>
+<section class="card" aria-labelledby="page-title">
+<div class="mark" aria-hidden="true">
+<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round">
+<circle cx="24" cy="9.5" r="3.5" fill="currentColor" stroke="none"/>
+<circle cx="10" cy="25" r="3.5" fill="currentColor" stroke="none"/>
+<circle cx="38" cy="25" r="3.5" fill="currentColor" stroke="none"/>
+<circle cx="24" cy="39" r="3.5" fill="currentColor" stroke="none"/>
+<path d="M20.8 12.4 13 21.6m14.2-9.2 7.8 9.2M13 28.3l7.8 7.8m14.2-7.8-7.8 7.8M13.5 25h21M24 13v22"/>
+</svg>
+</div>
+<p class="eyebrow">CONEXIÓN SEGURA</p>
+<h1 id="page-title">Conecta tu memoria con ChatGPT</h1>
+<p class="intro">Autoriza a ChatGPT a consultar los cuadernos de NotebookLM disponibles en tu Aizens Brain.</p>
+<div class="permissions">
+<span class="permission-icon" aria-hidden="true">✓</span>
+<div><strong>Acceso de solo lectura</strong>
+<small>Consultar cuadernos y respuestas con fuentes. No puede editarlos ni eliminarlos.</small></div>
+</div>
+__MESSAGE__
+<form action="/oauth/authorize" method="post" autocomplete="off">
+__FIELDS__
+<label for="password">Clave de acceso privada</label>
+<input id="password" type="password" name="password" autocomplete="off"
+ placeholder="Introduce tu clave de Aizens Brain" required>
+<p class="hint">Utiliza la clave privada configurada en tu servidor. No la compartas en ningún chat.</p>
+<button type="submit">Autorizar conexión <span class="arrow" aria-hidden="true">→</span></button>
+</form>
+<div class="trust">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>
+</svg>
+Conexión protegida · Aizens Brain
+</div>
+</section>
+</main>
+<footer>La clave se utiliza únicamente para autorizar el acceso.<br> Nunca se envía al chat.</footer>
+</body>
+</html>'''
+    return template.replace("__FIELDS__", hidden).replace("__MESSAGE__", message)
 
 def _html(body, status=200):
     return HTMLResponse(body, status_code=status, headers={
         "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
-        "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
+        "Referrer-Policy": "same-origin", "X-Frame-Options": "DENY",
         "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     })
 
@@ -212,8 +332,27 @@ def create_oauth_router():
         fields = _fields(params) if params else None
         if fields is None:
             return _error("invalid_request")
-        if _verify(request.cookies.get("aizens_oauth_csrf", ""), "csrf") is None:
-            return _error("invalid_request", 403)
+        ticket = _verify(params.get("form_ticket", ""), "form")
+        if (
+            ticket is None
+            or ticket.get("client_id") != fields["client_id"]
+            or ticket.get("redirect_uri") != fields["redirect_uri"]
+            or ticket.get("challenge") != fields["code_challenge"]
+            or ticket.get("state") != fields["state"]
+        ):
+            return _html(_page({**fields, "response_type": "code",
+                                "code_challenge_method": "S256"}, error="session"), 403)
+        cookie_ok = _verify(request.cookies.get("aizens_oauth_csrf", ""), "csrf") is not None
+        # Brave and other privacy browsers can drop the same-site cookie.
+        # Permit the signed form ticket only from our *exact* HTTPS origin.
+        origin = request.headers.get("origin", "").rstrip("/")
+        referer = request.headers.get("referer", "")
+        same_origin = origin == _base() or (
+            not origin and referer.startswith(_base() + "/oauth/authorize")
+        )
+        if not (cookie_ok or same_origin):
+            return _html(_page({**fields, "response_type": "code",
+                                "code_challenge_method": "S256"}, error="session"), 403)
         secret = os.getenv("AIZENS_BRAIN_LOGIN_SECRET", "").strip()
         expected = secret or os.getenv("NOTEBOOKLM_SERVER_TOKEN", "").strip()
         password = params.get("password", "")
