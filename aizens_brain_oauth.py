@@ -109,18 +109,24 @@ def _fields(params):
     redirect = params.get("redirect_uri", "")
     challenge = params.get("code_challenge", "")
     state = params.get("state", "")
+    requested = (params.get("scope") or SCOPE).split()
+    if len(requested) != len(set(requested)) or set(requested) not in (
+        {SCOPE}, {"brain:read", "brain:write"}
+    ):
+        return None
+    # OAuth scopes form a set: clients may request them in either order.
+    normalized_scope = WRITE_SCOPE if len(requested) == 2 else SCOPE
     if (
         not _client_redirect_valid(client_id, redirect)
         or params.get("response_type") != "code"
         or params.get("code_challenge_method") != "S256"
         or not PKCE_RE.fullmatch(challenge)
         or len(state) > 1024 or params.get("resource", _resource()) != _resource()
-        or params.get("scope", SCOPE) not in (*ACCEPTED_SCOPES, "")
     ):
         return None
     return {
         "client_id": client_id, "redirect_uri": redirect, "code_challenge": challenge,
-        "state": state, "resource": _resource(), "scope": params.get("scope") or SCOPE,
+        "state": state, "resource": _resource(), "scope": normalized_scope,
     }
 
 def _form_ticket(fields):
